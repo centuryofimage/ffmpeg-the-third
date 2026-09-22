@@ -1,3 +1,7 @@
+// The app validates its narrow FFmpeg build; Cargo --all-targets can otherwise
+// enable upstream tests despite the library target's test = false setting.
+#![cfg(not(test))]
+
 pub use ffmpeg_sys_the_third as sys;
 pub use ffmpeg_sys_the_third as ffi;
 
