@@ -12,5 +12,9 @@ example, and benchmark targets during workspace checks. `src/lib.rs` also gates
 the upstream test build because Cargo `--all-targets` can override the library
 target's `test = false`. The `ffmpeg-sys-the-third` dependency uses crates.io,
 as the published crate does, rather than the repository's bundled path.
+The local default feature set is `static`, `filter`, `format`, and
+`software-scaling`, matching the application dependency. Cargo includes this path
+dependency in workspace-wide commands on Windows, so the upstream defaults would
+also request unbuilt `avdevice` and `swresample` libraries.
 
 No wrapper API or implementation has been changed in this integration commit.
