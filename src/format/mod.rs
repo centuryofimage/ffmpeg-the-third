@@ -88,27 +88,66 @@ where
     }
 }
 
+/// Open and probe an input with an owned interruption callback.
+///
+/// The callback may run on a native worker thread. It must own its captures and
+/// is released after the native input closes, including on open/probe failure.
+/// As with other interrupt callbacks in this crate, a panic aborts the process.
 pub fn input_with_interrupt<P, F>(path_or_url: P, closure: F) -> Result<context::Input, Error>
 where
     P: AsRef<OsStr>,
-    F: FnMut() -> bool,
+    F: FnMut() -> bool + Send + 'static,
 {
+    input_with_dictionary_and_interrupt(
+        path_or_url,
+        crate::Dictionary::new(),
+        &crate::Dictionary::new(),
+        closure,
+    )
+}
+
+/// Open an input with format options, per-stream probe options, and an owned
+/// interruption callback. For example, format options may set `probesize`,
+/// `analyzeduration`, or `protocol_whitelist`; probe options may set `threads`.
+/// Probe options apply to streams present after opening (see `find_stream_info`).
+/// Interior NUL bytes in the path return `EINVAL`.
+///
+/// The callback is serialized, may run on a native worker thread, and remains
+/// alive through input destruction. A callback panic aborts the process.
+pub fn input_with_dictionary_and_interrupt<P, F>(
+    path_or_url: P,
+    mut options: crate::Dictionary,
+    probe_options: &crate::Dictionary,
+    closure: F,
+) -> Result<context::Input, Error>
+where
+    P: AsRef<OsStr>,
+    F: FnMut() -> bool + Send + 'static,
+{
+    let path = CString::new(path_or_url.as_ref().as_encoded_bytes()).map_err(|_| Error::Other {
+        errno: libc::EINVAL,
+    })?;
+    let interrupt = interrupt::new(Box::new(closure));
+    // Keep the callback owner local until opening succeeds. FFmpeg can invoke it
+    // while opening, closing after failure, or probing an already-owned input.
     unsafe {
-        let mut ps = avformat_alloc_context();
-        let path = from_os_str(path_or_url);
-        (*ps).interrupt_callback = interrupt::new(Box::new(closure)).interrupt;
-
-        match avformat_open_input(&mut ps, path.as_ptr(), ptr::null_mut(), ptr::null_mut()) {
-            0 => match avformat_find_stream_info(ps, ptr::null_mut()) {
-                r if r >= 0 => Ok(context::Input::wrap(ps)),
-                e => {
-                    avformat_close_input(&mut ps);
-                    Err(Error::from(e))
-                }
-            },
-
-            e => Err(Error::from(e)),
+        let mut raw = avformat_alloc_context();
+        if raw.is_null() {
+            return Err(Error::Other {
+                errno: libc::ENOMEM,
+            });
         }
+        (*raw).interrupt_callback = interrupt.interrupt;
+        let result =
+            avformat_open_input(&mut raw, path.as_ptr(), ptr::null(), options.as_mut_ptr());
+        if result < 0 {
+            avformat_close_input(&mut raw);
+            return Err(Error::from(result));
+        }
+        let mut input = context::Input::wrap(raw);
+        input.retain_interrupt(interrupt);
+        input.find_stream_info(probe_options)?;
+        Ok(input)
     }
 }
 

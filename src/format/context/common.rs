@@ -17,6 +17,10 @@ pub struct Context {
 unsafe impl Send for Context {}
 
 impl Context {
+    pub(crate) fn retain_interrupt(&mut self, interrupt: crate::util::interrupt::Interrupt) {
+        self._dtor.set_interrupt(interrupt);
+    }
+
     pub unsafe fn wrap(ptr: *mut AVFormatContext, mode: destructor::Mode) -> Self {
         Context {
             ptr,

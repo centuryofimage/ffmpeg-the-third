@@ -12,11 +12,21 @@ pub enum Mode {
 pub struct Destructor {
     ptr: *mut AVFormatContext,
     mode: Mode,
+    // Dropped after Drop::drop closes the native context, including close-time callbacks.
+    interrupt: Option<crate::util::interrupt::Interrupt>,
 }
 
 impl Destructor {
     pub unsafe fn new(ptr: *mut AVFormatContext, mode: Mode) -> Self {
-        Destructor { ptr, mode }
+        Destructor {
+            ptr,
+            mode,
+            interrupt: None,
+        }
+    }
+
+    pub(crate) fn set_interrupt(&mut self, interrupt: crate::util::interrupt::Interrupt) {
+        self.interrupt = Some(interrupt);
     }
 }
 

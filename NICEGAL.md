@@ -17,4 +17,18 @@ The local default feature set is `static`, `filter`, `format`, and
 dependency in workspace-wide commands on Windows, so the upstream defaults would
 also request unbuilt `avdevice` and `swresample` libraries.
 
-No wrapper API or implementation has been changed in this integration commit.
+Safe API additions:
+
+- `format::input_with_dictionary_and_interrupt` combines format options,
+  per-stream probe options, and an owned callback.
+- `Input::find_stream_info` copies probe options per existing stream and frees
+  the dictionaries on success or failure.
+- `ParametersRef::side_data` borrows coded side-data bytes on FFmpeg 7+.
+
+`input_with_interrupt` now retains its callback through native close and releases
+it on failed opening/probing. Callbacks require `Send + 'static` because inputs
+can move across threads; invocation is serialized. Callback panics still abort.
+The callback owner lives with the format context destructor, so moving or swapping
+contexts does not separate the native pointer from its callback allocation.
+Regression tests live in the application's `tests/ffmpeg_input.rs`, alongside
+its decoder/rotation fixture tests, while the upstream test suite stays disabled.
