@@ -762,29 +762,6 @@ fn main() {
         pkgconfig.probe("libavcodec").unwrap().include_paths
     };
 
-    if statik && cfg!(target_os = "macos") {
-        let frameworks = vec![
-            "AppKit",
-            "AudioToolbox",
-            "AVFoundation",
-            "CoreFoundation",
-            "CoreGraphics",
-            "CoreMedia",
-            "CoreServices",
-            "CoreVideo",
-            "Foundation",
-            "OpenCL",
-            "OpenGL",
-            "QuartzCore",
-            "Security",
-            "VideoDecodeAcceleration",
-            "VideoToolbox",
-        ];
-        for f in frameworks {
-            println!("cargo::rustc-link-lib=framework={f}");
-        }
-    }
-
     check_features(&enabled_libraries, &include_paths);
 
     let mut wrapper_h = String::with_capacity(2048);
