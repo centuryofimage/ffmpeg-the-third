@@ -450,9 +450,7 @@ impl ParseCallbacks for Callbacks {
         }
 
         let Some(prefix) = self.enum_prefixes.get(enum_name) else {
-            println!(
-                "cargo::warning=unknown FFmpeg enum: {original_variant_name} from {enum_name}"
-            );
+            // Included platform headers also define enums; leave their names intact.
             return None;
         };
 
