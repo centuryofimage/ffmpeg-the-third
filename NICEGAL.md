@@ -17,4 +17,18 @@ The local default feature set is `static`, `filter`, `format`, and
 dependency in workspace-wide commands on Windows, so the upstream defaults would
 also request unbuilt `avdevice` and `swresample` libraries.
 
-No wrapper API or implementation has been changed in this integration commit.
+This branch (`nicegal/integration`) is upstream master plus the following wrapper changes,
+each prepared as its own upstream branch (`upstream-pr/*`) except the last:
+
+- `Input::find_stream_info(&Dictionary)` copies probe options per existing stream
+  (`upstream-pr/find-stream-info`).
+- `ParametersRef::side_data` borrows coded side-data bytes on FFmpeg 7+
+  (`upstream-pr/side-data`).
+- `input_with_interrupt` retains its callback through native close instead of leaking it, and
+  callbacks require `Send + 'static` (`upstream-pr/interrupt-leak`).
+- `format::input_with_dictionary_and_interrupt` combines format options, per-stream probe
+  options, and an owned callback. This is local only: upstream's pending `format::context` rework
+  would turn it into builder options, so it is not proposed upstream yet.
+
+Regression tests live in the application's `tests/ffmpeg_input.rs`, alongside its
+decoder/rotation fixture tests, while the upstream test suite stays disabled.

@@ -120,6 +120,52 @@ where
     }
 }
 
+/// Opens an input with format options, per-stream probe options, and an interrupt callback.
+///
+/// Format `options` are passed to `avformat_open_input` (e.g. `probesize`, `analyzeduration` or
+/// `protocol_whitelist`). `probe_options` are passed to [`Input::find_stream_info`] (e.g.
+/// `threads`). See [`input_with_interrupt`] for the requirements on `closure`.
+///
+/// Returns `Error::Other { errno: EINVAL }` if `path_or_url` contains a NUL byte.
+///
+/// [`Input::find_stream_info`]: context::Input::find_stream_info
+pub fn input_with_dictionary_and_interrupt<P, F>(
+    path_or_url: P,
+    mut options: crate::Dictionary,
+    probe_options: &crate::Dictionary,
+    closure: F,
+) -> Result<context::Input, Error>
+where
+    P: AsRef<OsStr>,
+    F: FnMut() -> bool + Send + 'static,
+{
+    let path = CString::new(path_or_url.as_ref().as_encoded_bytes()).map_err(|_| Error::Other {
+        errno: libc::EINVAL,
+    })?;
+    let interrupt = interrupt::new(Box::new(closure));
+
+    let mut input = unsafe {
+        let mut ps = avformat_alloc_context();
+        if ps.is_null() {
+            return Err(Error::Other {
+                errno: libc::ENOMEM,
+            });
+        }
+        (*ps).interrupt_callback = interrupt.interrupt;
+
+        // On failure, FFmpeg frees the context (possibly invoking the callback, which is
+        // still alive) and sets `ps` to null.
+        match avformat_open_input(&mut ps, path.as_ptr(), ptr::null(), options.as_mut_ptr()) {
+            0 => context::Input::wrap(ps),
+            e => return Err(Error::from(e)),
+        }
+    };
+    // From here on, dropping `input` closes the context before freeing the callback.
+    input.retain_interrupt(interrupt);
+    input.find_stream_info(probe_options)?;
+    Ok(input)
+}
+
 fn from_os_str(path_or_url: impl AsRef<OsStr>) -> CString {
     CString::new(path_or_url.as_ref().as_encoded_bytes()).unwrap()
 }
