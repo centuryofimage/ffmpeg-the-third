@@ -168,3 +168,59 @@ pub fn dump(ctx: &Input, index: i32, url: Option<&str>) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::{env, fs, process, ptr};
+
+    use super::*;
+    use crate::{media, Dictionary};
+
+    /// Writes 0.1 s of silent 8 kHz mono 16-bit PCM WAV, which every FFmpeg build can demux.
+    fn write_wav(name: &str) -> PathBuf {
+        let data_len: u32 = 1600;
+        let mut bytes = Vec::with_capacity(44 + data_len as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // channels
+        bytes.extend_from_slice(&8000u32.to_le_bytes()); // sample rate
+        bytes.extend_from_slice(&16000u32.to_le_bytes()); // byte rate
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // block align
+        bytes.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        bytes.resize(44 + data_len as usize, 0);
+
+        let path = env::temp_dir().join(format!("ffmpeg-the-third-{}-{name}.wav", process::id()));
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+    #[test]
+    fn find_stream_info_with_options() {
+        let path = write_wav("find-stream-info");
+        let c_path = CString::new(path.to_str().unwrap()).unwrap();
+        let mut ps = ptr::null_mut();
+        let opened = unsafe {
+            avformat_open_input(&mut ps, c_path.as_ptr(), ptr::null_mut(), ptr::null_mut())
+        };
+        assert_eq!(opened, 0);
+        let mut input = unsafe { Input::wrap(ps) };
+
+        let mut options = Dictionary::new();
+        options.set("threads", "1");
+        input.find_stream_info(&options).unwrap();
+
+        // The caller's dictionary is copied for each stream, not consumed.
+        assert_eq!(options.get("threads"), Some("1"));
+        assert_eq!(input.nb_streams(), 1);
+        let stream = input.streams().next().unwrap();
+        assert_eq!(stream.parameters().medium(), media::Type::Audio);
+
+        drop(input);
+        fs::remove_file(path).unwrap();
+    }
+}
