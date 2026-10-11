@@ -219,3 +219,110 @@ where
 
     Ok(ctx)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::{env, fs, process};
+
+    use super::*;
+
+    /// Writes 0.1 s of silent 8 kHz mono 16-bit PCM WAV, which every FFmpeg build can demux.
+    fn write_wav(name: &str) -> PathBuf {
+        let data_len: u32 = 1600;
+        let mut bytes = Vec::with_capacity(44 + data_len as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // channels
+        bytes.extend_from_slice(&8000u32.to_le_bytes()); // sample rate
+        bytes.extend_from_slice(&16000u32.to_le_bytes()); // byte rate
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // block align
+        bytes.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        bytes.resize(44 + data_len as usize, 0);
+
+        let path = env::temp_dir().join(format!("ffmpeg-the-third-{}-{name}.wav", process::id()));
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    /// Sets its flag when dropped, to observe when the interrupt closure is freed.
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn interrupt_callback_lives_until_input_is_closed() {
+        let path = write_wav("interrupt-close");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let flag = DropFlag(dropped.clone());
+        let counter = calls.clone();
+
+        let input = input_with_interrupt(&path, move || {
+            let _ = &flag;
+            counter.fetch_add(1, Ordering::SeqCst);
+            false
+        })
+        .unwrap();
+        assert!(calls.load(Ordering::SeqCst) > 0);
+        assert!(!dropped.load(Ordering::SeqCst));
+
+        drop(input);
+        assert!(dropped.load(Ordering::SeqCst));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn interrupted_open_fails_and_frees_callback() {
+        let path = write_wav("interrupt-abort");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let flag = DropFlag(dropped.clone());
+
+        let result = input_with_interrupt(&path, move || {
+            let _ = &flag;
+            true
+        });
+        assert!(matches!(result, Err(Error::Exit)));
+        assert!(dropped.load(Ordering::SeqCst));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn interrupt_callback_moves_with_its_context() {
+        let path = write_wav("interrupt-swap");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let flag = DropFlag(dropped.clone());
+
+        let mut a = input_with_interrupt(&path, move || {
+            let _ = &flag;
+            false
+        })
+        .unwrap();
+        let mut b = input_with_interrupt(&path, || false).unwrap();
+
+        // `b` now owns the context that was opened with the flagged callback.
+        std::mem::swap(&mut *a, &mut *b);
+        drop(a);
+        let freed_early = dropped.load(Ordering::SeqCst);
+        if freed_early {
+            // Closing `b` would invoke the freed callback.
+            std::mem::forget(b);
+            panic!("the callback was freed while its context was still open");
+        }
+
+        drop(b);
+        assert!(dropped.load(Ordering::SeqCst));
+        fs::remove_file(path).unwrap();
+    }
+}
