@@ -15,6 +15,33 @@ pub struct Input {
 unsafe impl Send for Input {}
 
 impl Input {
+    /// Discover stream information using a separate copy of `options` for each
+    /// stream present when probing starts (for example, `threads=1`).
+    /// Streams discovered during probing use FFmpeg's defaults.
+    pub fn find_stream_info(&mut self, options: &crate::Dictionary) -> Result<(), Error> {
+        let mut dictionaries = vec![options.clone(); self.nb_streams() as usize];
+        let mut pointers: Vec<_> = dictionaries
+            .iter_mut()
+            .map(|dict| *dict.as_mut_ptr())
+            .collect();
+        // FFmpeg may replace each dictionary pointer. Restore ownership of the
+        // returned dictionaries before any fallible Rust work or error return.
+        let options_ptr = if pointers.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            pointers.as_mut_ptr()
+        };
+        let result = unsafe { avformat_find_stream_info(self.as_mut_ptr(), options_ptr) };
+        for (dictionary, pointer) in dictionaries.iter_mut().zip(pointers) {
+            *dictionary.as_mut_ptr() = pointer;
+        }
+        if result < 0 {
+            Err(Error::from(result))
+        } else {
+            Ok(())
+        }
+    }
+
     pub unsafe fn wrap(ptr: *mut AVFormatContext) -> Self {
         Input {
             ptr,
