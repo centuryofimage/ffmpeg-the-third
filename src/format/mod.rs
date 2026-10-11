@@ -99,8 +99,13 @@ where
     F: FnMut() -> bool + Send + 'static,
 {
     unsafe {
-        let mut ps = avformat_alloc_context();
         let path = from_os_str(path_or_url);
+        let mut ps = avformat_alloc_context();
+        if ps.is_null() {
+            return Err(Error::Other {
+                errno: libc::ENOMEM,
+            });
+        }
         let interrupt = interrupt::new(Box::new(closure));
         (*ps).interrupt_callback = interrupt.interrupt;
 
