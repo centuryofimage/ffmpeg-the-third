@@ -65,7 +65,7 @@ impl<'p> AsPtr<AVCodecParameters> for ParametersRef<'p> {
     }
 }
 
-#[cfg(all(test, feature = "ffmpeg_7_0"))]
+#[cfg(all(test, feature = "ffmpeg_7_1"))]
 mod tests {
     use super::*;
     use crate::codec::Parameters;
