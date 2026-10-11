@@ -64,3 +64,51 @@ impl<'p> AsPtr<AVCodecParameters> for ParametersRef<'p> {
         self.ptr.as_ptr()
     }
 }
+
+#[cfg(all(test, feature = "ffmpeg_7_0"))]
+mod tests {
+    use super::*;
+    use crate::codec::Parameters;
+
+    fn add_side_data(parameters: &mut Parameters, kind: SideDataType, bytes: &[u8]) {
+        unsafe {
+            let parameters = parameters.as_mut_ptr();
+            let item = av_packet_side_data_new(
+                &mut (*parameters).coded_side_data,
+                &mut (*parameters).nb_coded_side_data,
+                kind.into(),
+                bytes.len(),
+                0,
+            );
+            assert!(!item.is_null(), "av_packet_side_data_new failed");
+            slice::from_raw_parts_mut((*item).data, bytes.len()).copy_from_slice(bytes);
+        }
+    }
+
+    #[test]
+    fn side_data_is_none_without_side_data() {
+        let parameters = Parameters::new();
+        let borrowed = unsafe { ParametersRef::from_raw(parameters.as_ptr()) }.unwrap();
+        assert_eq!(borrowed.side_data(SideDataType::DisplayMatrix), None);
+    }
+
+    #[test]
+    fn side_data_finds_requested_kind() {
+        let mut parameters = Parameters::new();
+        add_side_data(&mut parameters, SideDataType::ReplayGain, &[1, 2, 3]);
+        add_side_data(&mut parameters, SideDataType::DisplayMatrix, &[4, 5, 6, 7]);
+        add_side_data(&mut parameters, SideDataType::Stereo3d, &[]);
+
+        let borrowed = unsafe { ParametersRef::from_raw(parameters.as_ptr()) }.unwrap();
+        assert_eq!(
+            borrowed.side_data(SideDataType::DisplayMatrix),
+            Some(&[4, 5, 6, 7][..])
+        );
+        assert_eq!(
+            borrowed.side_data(SideDataType::ReplayGain),
+            Some(&[1, 2, 3][..])
+        );
+        assert_eq!(borrowed.side_data(SideDataType::Stereo3d), Some(&[][..]));
+        assert_eq!(borrowed.side_data(SideDataType::NewExtraData), None);
+    }
+}
