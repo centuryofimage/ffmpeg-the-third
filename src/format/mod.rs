@@ -88,24 +88,32 @@ where
     }
 }
 
+/// Opens an input with an interrupt callback, then probes its streams.
+///
+/// FFmpeg may invoke `closure` from any thread that performs I/O on the input, and calls are
+/// serialized. Returning `true` aborts the blocking operation in progress. The callback is
+/// kept alive until the input has been closed. If it panics, the process is aborted.
 pub fn input_with_interrupt<P, F>(path_or_url: P, closure: F) -> Result<context::Input, Error>
 where
     P: AsRef<OsStr>,
-    F: FnMut() -> bool,
+    F: FnMut() -> bool + Send + 'static,
 {
     unsafe {
         let mut ps = avformat_alloc_context();
         let path = from_os_str(path_or_url);
-        (*ps).interrupt_callback = interrupt::new(Box::new(closure)).interrupt;
+        let interrupt = interrupt::new(Box::new(closure));
+        (*ps).interrupt_callback = interrupt.interrupt;
 
         match avformat_open_input(&mut ps, path.as_ptr(), ptr::null_mut(), ptr::null_mut()) {
-            0 => match avformat_find_stream_info(ps, ptr::null_mut()) {
-                r if r >= 0 => Ok(context::Input::wrap(ps)),
-                e => {
-                    avformat_close_input(&mut ps);
-                    Err(Error::from(e))
+            0 => {
+                // Dropping the input closes the context before the callback is freed.
+                let mut input = context::Input::wrap(ps);
+                input.retain_interrupt(interrupt);
+                match avformat_find_stream_info(input.as_mut_ptr(), ptr::null_mut()) {
+                    r if r >= 0 => Ok(input),
+                    e => Err(Error::from(e)),
                 }
-            },
+            }
 
             e => Err(Error::from(e)),
         }
