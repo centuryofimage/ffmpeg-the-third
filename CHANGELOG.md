@@ -4,6 +4,9 @@
 
 - [Feature] Add `format::context::Input::find_stream_info`, which accepts per-stream probe options
 - [Feature] Add `ParametersRef::side_data` to borrow global coded side data (FFmpeg 7.0+)
+- [Breaking] `format::input_with_interrupt` requires the callback to be `Send + 'static`; calls to it are now serialized
+- [Breaking] `util::interrupt::Interrupt` and `util::interrupt::new` are no longer public
+- fix: `format::input_with_interrupt` no longer leaks its callback; it is kept alive until the input is closed
 
 ## Version 6.0.0
 
