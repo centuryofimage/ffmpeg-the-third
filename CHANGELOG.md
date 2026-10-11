@@ -3,6 +3,7 @@
 ## Unreleased
 
 - [Feature] Add `format::context::Input::find_stream_info`, which accepts per-stream probe options
+- [Feature] Add `ParametersRef::side_data` to borrow global coded side data (FFmpeg 7.0+)
 
 ## Version 6.0.0
 
